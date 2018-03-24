@@ -7,6 +7,27 @@
 
 # define MAX(x,y) ((x)>=(y) ? (x) : (y))
 
+void *xrealloc(void *ptr, size_t num_bytes) {
+    ptr = realloc(ptr, num_bytes);
+    if (!ptr) {
+        perror("xrealloc failed");
+        exit(1);
+    }
+    return ptr;
+}
+
+void *xmalloc(size_t num_bytes) {
+    void *ptr = malloc(num_bytes);
+    if (!ptr) {
+        perror("malloc failed");
+        exit(1);
+    }
+    return ptr;
+}
+
+//////////////////
+// stretchy buffer
+//////////////////
 typedef struct BufHdr {
     size_t len;
     size_t cap;
@@ -22,7 +43,7 @@ typedef struct BufHdr {
 #define buf_cap(b) ((b) ? buf__hdr(b)->cap : 0)
 #define buf_push(b, x) (buf__fit(b, 1), b[buf_len(b)] = (x), buf__hdr(b)->len++)
 
-#define buf_free(b) ((b) ? free(buf__hdr(b)) : 0)
+#define buf_free(b) ((b) ? (free(buf__hdr(b)), (b) = NULL) : 0)
 
 void *buf__grow(const void *buf, size_t new_len, size_t elem_size) {
     size_t new_cap = MAX(1 + 2*buf_cap(buf), new_len);
@@ -30,9 +51,9 @@ void *buf__grow(const void *buf, size_t new_len, size_t elem_size) {
     size_t new_size = offsetof(BufHdr, buf) +  new_cap * elem_size;
     BufHdr *new_hdr;
     if (buf) {
-        new_hdr = realloc(buf__hdr(buf), new_size);
+        new_hdr = xrealloc(buf__hdr(buf), new_size);
     } else {
-        new_hdr = malloc(new_size);
+        new_hdr = xmalloc(new_size);
         new_hdr->len = 0;
     }
 
@@ -41,19 +62,23 @@ void *buf__grow(const void *buf, size_t new_len, size_t elem_size) {
 }
 
 void buf_test() {
-    int *buf = NULL;
-
+    int *asfd = NULL;
+    assert(buf_len(asfd) == 0);
     enum { N = 1024 };
     for (int i = 0; i < N; ++i)
     {
-        buf_push(buf, i);
+        buf_push(asfd, i);
     }
 
-    assert(buf_len(buf) == N);
-    for (int i = 0; i < buf_len(buf); ++i)
+    assert(buf_len(asfd) == N);
+    for (int i = 0; i < buf_len(asfd); ++i)
     {
-        assert(buf[i] == i);
+        assert(asfd[i] == i);
     }
+
+    buf_free(asfd);
+    assert(asfd == NULL);
+    assert(buf_len(asfd) == NULL);
 }
 
 typedef enum TokenKind {
