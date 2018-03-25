@@ -135,28 +135,41 @@ void str_intern_test() {
 // lexer stuff
 //////////////////
 typedef enum TokenKind {
-    TOKEN_INT = 128,
+    // Reserve first 128 values for one-char tokens
+    TOKEN_LAST_CHAR = 127,
+    TOKEN_INT,
     TOKEN_NAME,
-    // FIRST_NONCHAR_TOKEN = 128,
+    // ...
 } TokenKind;
 
-// Warning: This returns a pointer to a static buffer, so it'll be overwritten next call.
-const char *token_kind_name(TokenKind kind) {
-    static char buf[256];
+size_t copy_token_kind_str(char *dest, size_t dest_size, TokenKind kind) {
+    size_t n = 0;
     switch (kind) {
+    case 0:
+        n = snprintf(dest, dest_size, "end of file");
+        break;
     case TOKEN_INT:
-        sprintf(buf, "integer");
+        n = snprintf(dest, dest_size, "integer");
         break;
     case TOKEN_NAME:
-        sprintf(buf, "name");
+        n = snprintf(dest, dest_size, "name");
         break;
     default:
-        if (kind < 128 && isprint(kind)){
-            sprintf(buf, "%c", kind);
+        if (kind < 128 && isprint(kind)) {
+            n = snprintf(dest, dest_size, "%c", kind);
         } else {
-            sprintf(buf, "<ASCII %d>", kind);
+            n = snprintf(dest, dest_size, "<ASCII %d>", kind);
         }
+        break;
     }
+    return n;
+}
+
+// Warning: This returns a pointer to a static internal buffer, so the next call will overwrite it.
+const char *token_kind_str(TokenKind kind) {
+    static char buf[256];
+    size_t n = copy_token_kind_str(buf, sizeof(buf), kind);
+    assert(n + 1 <= sizeof(buf));
     return buf;
 }
 
@@ -187,16 +200,7 @@ void init_keywords() {
 void next_token() {
     token.start = stream;
     switch (*stream) {
-    case '0':
-    case '1':
-    case '2':
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7':
-    case '8':
-    case '9': {
+    case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
         int val = 0;
         while (isdigit(*stream)) {
             val *= 10;
@@ -206,66 +210,19 @@ void next_token() {
         token.val = val;
         break;
     }
-    case 'a':
-    case 'b':
-    case 'c':
-    case 'd':
-    case 'e':
-    case 'f':
-    case 'g':
-    case 'h':
-    case 'i':
-    case 'j':
-    case 'k':
-    case 'l':
-    case 'm':
-    case 'n':
-    case 'o':
-    case 'p':
-    case 'q':
-    case 'r':
-    case 's':
-    case 't':
-    case 'u':
-    case 'v':
-    case 'w':
-    case 'x':
-    case 'y':
-    case 'z':
-    case 'A':
-    case 'B':
-    case 'C':
-    case 'D':
-    case 'E':
-    case 'F':
-    case 'G':
-    case 'H':
-    case 'I':
-    case 'J':
-    case 'K':
-    case 'L':
-    case 'M':
-    case 'N':
-    case 'O':
-    case 'P':
-    case 'Q':
-    case 'R':
-    case 'S':
-    case 'T':
-    case 'U':
-    case 'V':
-    case 'W':
-    case 'X':
-    case 'Y':
-    case 'Z':
-    case '_': {
+    case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j':
+    case 'k': case 'l': case 'm': case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't':
+    case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
+    case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J':
+    case 'K': case 'L': case 'M': case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T':
+    case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
+    case '_':
         while (isalnum(*stream) || *stream == '_') {
             stream++;
         }
         token.kind = TOKEN_NAME;
         token.name = str_intern_range(token.start, stream);
         break;
-    }
     default:
         token.kind = *stream++;
         break;
@@ -279,16 +236,16 @@ void init_stream(const char *str) {
 }
 
 void print_token(Token token) {
-    switch(token.kind) {
-        case TOKEN_INT:
-            printf("TOKEN_INT: %llu\n", token.val);
-            break;
-        case TOKEN_NAME:
-            printf("TOKEN_NAME: %.*s -- %i\n", (int)(token.end - token.start), token.start, token.name);
-            break;
-        default:
-            printf("TOKEN '%c'\n", token.kind);
-            break;
+    switch (token.kind) {
+    case TOKEN_INT:
+        printf("TOKEN INT: %d\n", token.val);
+        break;
+    case TOKEN_NAME:
+        printf("TOKEN NAME: %.*s\n", (int)(token.end - token.start), token.start);
+        break;
+    default:
+        printf("TOKEN '%c'\n", token.kind);
+        break;
     }
 }
 
@@ -314,27 +271,46 @@ static inline bool expect_token(TokenKind kind) {
         next_token();
         return true;
     } else {
-        fatal("expected token %s got %s", token_kind_name(kind), token_kind_name(token.kind));
+        char buf[256];
+        copy_token_kind_str(buf, sizeof(buf), kind);
+        fatal("expected token %s, got %s", buf, token_kind_str(token.kind));
         return false;
     }
 }
 
+#define assert_token(x) assert(match_token(x))
+#define assert_token_name(x) assert(token.name == str_intern(x) && match_token(TOKEN_NAME))
+#define assert_token_int(x) assert(token.val == (x) && match_token(TOKEN_INT))
+#define assert_token_eof() assert(is_token(0))
+
 void lex_test() {
-    char *source = "XY+(XY)((_HELLO1235-XY-4+845";
-    stream = source;
-    next_token();
-    while(token.kind) {
-        // print_token(token);
-        next_token();
-    }
+    const char *str = "XY+(XY)_HELLO1,234+994";
+    init_stream(str);
+    assert_token_name("XY");
+    assert_token('+');
+    assert_token('(');
+    assert_token_name("XY");
+    assert_token(')');
+    assert_token_name("_HELLO1");
+    assert_token(',');
+    assert_token_int(234);
+    assert_token('+');
+    assert_token_int(994);
+    assert_token_eof();
 }
 
-/*
-expr3 = INT | '(' expr ')'
-expr2 = [-]expr2 | expr3
-expr1 = expr2 ([/*] expr2)*
-expr0 = expr1 ([+-] expr1)*
-*/
+#undef assert_token_eof
+#undef assert_token_int
+#undef assert_token_name
+#undef assert_token
+
+#if 0
+    expr3 = INT | '(' expr ')' 
+    expr2 = '-' expr2 | expr3
+    expr1 = expr2 ([*/] expr2)*
+    expr0 = expr1 ([+-] expr1)*
+    expr = expr0
+#endif
 
 int parse_expr();
 
@@ -343,20 +319,20 @@ int parse_expr3() {
         int val = token.val;
         next_token();
         return val;
-    } else if(match_token('(')) {
+    } else if (match_token('(')) {
         int val = parse_expr();
         expect_token(')');
         return val;
     } else {
-        fatal("expected integer or (, got %s", token_kind_name(token.kind));
+        fatal("expected integer or (, got %s", token_kind_str(token.kind));
+        return 0;
     }
 }
 
 int parse_expr2() {
     if (match_token('-')) {
         return -parse_expr2();
-    }
-    else if (match_token('+')) {
+    } else if (match_token('+')) {
         return parse_expr2();
     } else {
         return parse_expr3();
@@ -400,33 +376,33 @@ int parse_expr() {
     return parse_expr0();
 }
 
-int parse_expr_str(const char *expr) {
-    init_stream(expr);
+int parse_expr_str(const char *str) {
+    init_stream(str);
     return parse_expr();
 }
 
-void parse_test() {
-#define TEST_EXPR(x) assert(parse_expr_str(#x) == (x))
-    TEST_EXPR(1);
-    TEST_EXPR((1));
-    TEST_EXPR((1-2-3)-5);
-    TEST_EXPR(2*3+4*5);
-    TEST_EXPR((4-2)-1);
-    TEST_EXPR(4-(2-1));
-    TEST_EXPR(-42);
-    TEST_EXPR(2+-3);
-    TEST_EXPR(9/3);
-    TEST_EXPR(-+3);
+#define assert_expr(x) assert(parse_expr_str(#x) == (x))
 
-#undef TEST_EXPR
+void parse_test() {
+    assert_expr(1);
+    assert_expr((1));
+    assert_expr(-+1);
+    assert_expr(1-2-3);
+    assert_expr(2*3+4*5);
+    assert_expr(2*(3+4)*5);
+    assert_expr(2+-3);
 }
 
-int main(int argc, char **argv) {
+#undef assert_expr
 
+void run_tests() {
     buf_test();
     lex_test();
     str_intern_test();
     parse_test();
+}
 
+int main(int argc, char **argv) {
+    run_tests();
     return 0;
 }
