@@ -61,8 +61,10 @@ typedef struct BufHdr {
 #define buf_free(b) ((b) ? (free(buf__hdr(b)), (b) = NULL) : 0)
 
 void *buf__grow(const void *buf, size_t new_len, size_t elem_size) {
+    assert(buf_cap(buf) <= (SIZE_MAX - 1)/2);
     size_t new_cap = MAX(1 + 2*buf_cap(buf), new_len);
     assert(new_len <= new_cap);
+    assert(new_cap <= (SIZE_MAX - offsetof(BufHdr, buf))/elem_size);
     size_t new_size = offsetof(BufHdr, buf) + new_cap*elem_size;
     BufHdr *new_hdr;
     if (buf) {
@@ -77,11 +79,11 @@ void *buf__grow(const void *buf, size_t new_len, size_t elem_size) {
 
 void buf_test() {
     int *asdf = NULL;
-    enum { N = 1024 };
-    for (int i = 0; i < N; i++) {
+    int n = 1024;
+    for (int i = 0; i < n; i++) {
         buf_push(asdf, i);
     }
-    assert(buf_len(asdf) == N);
+    assert(buf_len(asdf) == n);
     for (int i = 0; i < buf_len(asdf); i++) {
         assert(asdf[i] == i);
     }
@@ -93,24 +95,24 @@ void buf_test() {
 //////////////////
 // string interning
 //////////////////
-typedef struct InternStr {
+typedef struct Intern {
     size_t len;
     const char *str;
-} InternStr;
+} Intern;
 
-static InternStr *interns;
+static Intern *interns;
 
 const char *str_intern_range(const char *start, const char *end) {
     size_t len = end - start;
-    for(size_t i=0; i < buf_len(interns); i++) {
-        if (interns[i].len == len && strncmp(interns[i].str, start, len) == 0) {
-            return interns[i].str;
+    for(Intern *it = interns; it != buf_end(interns); it++) {
+        if (it->len == len && strncmp(it->str, start, len) == 0) {
+            return it->str;
         }
     }
     char *str = xmalloc(len + 1);
     memcpy(str, start, len);
     str[len] = 0;
-    buf_push(interns, ((InternStr){len, str}));
+    buf_push(interns, ((Intern){len, str}));
     return str;
 }
 
