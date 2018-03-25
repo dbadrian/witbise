@@ -1,11 +1,13 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
+#include <stdarg.h>
 
 # define MAX(x,y) ((x)>=(y) ? (x) : (y))
 
@@ -25,6 +27,16 @@ void *xmalloc(size_t num_bytes) {
         exit(1);
     }
     return ptr;
+}
+
+void fatal(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    printf("FATAL: ");
+    vprintf(fmt, args);
+    printf("\n");
+    va_end(args);
+    exit(1);
 }
 
 //////////////////
@@ -124,18 +136,49 @@ typedef enum TokenKind {
     // FIRST_NONCHAR_TOKEN = 128,
 } TokenKind;
 
+// Warning: This returns a pointer to a static buffer, so it'll be overwritten next call.
+const char *token_kind_name(TokenKind kind) {
+    static char buf[256];
+    switch (kind) {
+    case TOKEN_INT:
+        sprintf(buf, "integer");
+        break;
+    case TOKEN_NAME:
+        sprintf(buf, "name");
+        break;
+    default:
+        if (kind < 128 && isprint(kind)){
+            sprintf(buf, "%c", kind);
+        } else {
+            sprintf(buf, "<ASCII %d>", kind);
+        }
+    }
+    return buf;
+}
+
 typedef struct Token {
     TokenKind kind;
     const char *start;
     const char *end;
     union {
-        uint64_t val;
+        int val;
         const char *name;
     };
 } Token;
 
 Token token;
 const char *stream;
+
+const char *keyword_if;
+const char *keyword_for;
+const char *keyword_while;
+
+void init_keywords() {
+    keyword_if = str_intern("if");
+    keyword_for = str_intern("for");
+    keyword_while = str_intern("while");
+    // ...
+}
 
 void next_token() {
     token.start = stream;
@@ -150,7 +193,7 @@ void next_token() {
     case '7':
     case '8':
     case '9': {
-        uint64_t val = 0;
+        int val = 0;
         while (isdigit(*stream)) {
             val *= 10;
             val += *stream++ - '0';
@@ -226,6 +269,11 @@ void next_token() {
     token.end = stream;
 }
 
+void init_stream(const char *str) {
+    stream = str;
+    next_token();
+}
+
 void print_token(Token token) {
     switch(token.kind) {
         case TOKEN_INT:
@@ -238,28 +286,137 @@ void print_token(Token token) {
             printf("TOKEN '%c'\n", token.kind);
             break;
     }
-    printf("\n");
+}
+
+static inline bool is_token(TokenKind kind) {
+    return token.kind == kind;
+}
+
+static inline bool is_token_name(const char *name) {
+    return token.kind == TOKEN_NAME && token.name == name;
+}
+
+static inline bool match_token(TokenKind kind) {
+    if (is_token(kind)) {
+        next_token();
+        return true;
+    } else {
+        return false;
+    }
+}
+
+static inline bool expect_token(TokenKind kind) {
+    if (is_token(kind)) {
+        next_token();
+        return true;
+    } else {
+        fatal("expected token %s got %s", token_kind_name(kind), token_kind_name(token.kind));
+        return false;
+    }
 }
 
 void lex_test() {
-    char *source = "XY+(XY)((_HELLO1235XY4+845";
+    char *source = "XY+(XY)((_HELLO1235-XY-4+845";
     stream = source;
     next_token();
     while(token.kind) {
-        print_token(token);
+        // print_token(token);
         next_token();
     }
 }
 
+/*
+expr3 = INT | '(' expr ')'
+expr2 = [-]expr3
+expr1 = expr2 ([/*] expr2)*
+expr0 = expr1 ([+-] expr1)*
+*/
 
+int parse_expr();
 
+int parse_expr3() {
+    if (is_token(TOKEN_INT)) {
+        int val = token.val;
+        next_token();
+        return val;
+    } else if(match_token('(')) {
+        int val = parse_expr();
+        expect_token(')');
+        return val;
+    } else {
+        fatal("expected integer or (, got %s", token_kind_name(token.kind));
+    }
+}
 
+int parse_expr2() {
+    if (match_token('-')) {
+        return -parse_expr3();
+    } else {
+        return parse_expr3();
+    }
+}
+
+int parse_expr1() {
+    int val = parse_expr2();
+    while (is_token('*') || is_token('/')) {
+        char op = token.kind;
+        next_token();
+        int rval = parse_expr2();
+        if (op == '*') {
+            val *= rval;
+        } else {
+            assert(op == '-');
+            assert(rval != 0);
+            val /= rval;
+        }
+    }
+    return val;
+}
+
+int parse_expr0() {
+    int val = parse_expr1();
+    while (is_token('+') || is_token('-')) {
+        char op = token.kind;
+        next_token();
+        int rval = parse_expr1();
+        if (op == '+') {
+            val += rval;
+        } else {
+            val -= rval;
+        }
+    }
+    return val;
+}
+
+int parse_expr() {
+    return parse_expr0();
+}
+
+int parse_expr_str(const char *expr) {
+    init_stream(expr);
+    return parse_expr();
+}
+
+void parse_test() {
+#define TEST_EXPR(x) assert(parse_expr_str(#x) == (x))
+    TEST_EXPR(1);
+    TEST_EXPR((1));
+    TEST_EXPR((1-2-3)-5);
+    TEST_EXPR(2*3+4*5);
+    TEST_EXPR((4-2)-1);
+    TEST_EXPR(4-(2-1));
+    TEST_EXPR(-42);
+    TEST_EXPR(2+-3);
+
+#undef TEST_EXPR
+}
 
 int main(int argc, char **argv) {
 
     buf_test();
     lex_test();
     str_intern_test();
+    parse_test();
 
     return 0;
 }
