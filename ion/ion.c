@@ -1,9 +1,11 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <string.h>
 
 # define MAX(x,y) ((x)>=(y) ? (x) : (y))
 
@@ -37,18 +39,17 @@ typedef struct BufHdr {
 
 #define buf__hdr(b) ((BufHdr *)((char *)b - offsetof(BufHdr, buf)))
 #define buf__fits(b, n) (buf_len(b) + (n) <= buf_cap(b))
-#define buf__fit(b, n) (buf__fits(b,n) ? 0 : ((b) = (buf__grow((b), buf_len(b) + (n), sizeof(*(b))))))
+#define buf__fit(b, n) (buf__fits(b, n) ? 0 : ((b) = buf__grow((b), buf_len(b) + (n), sizeof(*(b)))))
 
 #define buf_len(b) ((b) ? buf__hdr(b)->len : 0)
 #define buf_cap(b) ((b) ? buf__hdr(b)->cap : 0)
 #define buf_push(b, x) (buf__fit(b, 1), b[buf_len(b)] = (x), buf__hdr(b)->len++)
-
 #define buf_free(b) ((b) ? (free(buf__hdr(b)), (b) = NULL) : 0)
 
 void *buf__grow(const void *buf, size_t new_len, size_t elem_size) {
     size_t new_cap = MAX(1 + 2*buf_cap(buf), new_len);
     assert(new_len <= new_cap);
-    size_t new_size = offsetof(BufHdr, buf) +  new_cap * elem_size;
+    size_t new_size = offsetof(BufHdr, buf) + new_cap*elem_size;
     BufHdr *new_hdr;
     if (buf) {
         new_hdr = xrealloc(buf__hdr(buf), new_size);
@@ -56,31 +57,67 @@ void *buf__grow(const void *buf, size_t new_len, size_t elem_size) {
         new_hdr = xmalloc(new_size);
         new_hdr->len = 0;
     }
-
     new_hdr->cap = new_cap;
     return new_hdr->buf;
 }
 
 void buf_test() {
-    int *asfd = NULL;
-    assert(buf_len(asfd) == 0);
+    int *asdf = NULL;
     enum { N = 1024 };
-    for (int i = 0; i < N; ++i)
-    {
-        buf_push(asfd, i);
+    for (int i = 0; i < N; i++) {
+        buf_push(asdf, i);
     }
-
-    assert(buf_len(asfd) == N);
-    for (int i = 0; i < buf_len(asfd); ++i)
-    {
-        assert(asfd[i] == i);
+    assert(buf_len(asdf) == N);
+    for (int i = 0; i < buf_len(asdf); i++) {
+        assert(asdf[i] == i);
     }
-
-    buf_free(asfd);
-    assert(asfd == NULL);
-    assert(buf_len(asfd) == NULL);
+    buf_free(asdf);
+    assert(asdf == NULL);
+    assert(buf_len(asdf) == 0);
 }
 
+//////////////////
+// string interning
+//////////////////
+typedef struct InternStr {
+    size_t len;
+    const char *str;
+} InternStr;
+
+static InternStr *interns;
+
+const char *str_intern_range(const char *start, const char *end) {
+    size_t len = end - start;
+    for(size_t i=0; i < buf_len(interns); i++) {
+        if (interns[i].len == len && strncmp(interns[i].str, start, len) == 0) {
+            return interns[i].str;
+        }
+    }
+    char *str = xmalloc(len + 1);
+    memcpy(str, start, len);
+    str[len] = 0;
+    buf_push(interns, ((InternStr){len, str}));
+    return str;
+}
+
+const char *str_intern(const char *str) {
+    return str_intern_range(str, str + strlen(str));
+}
+
+void str_intern_test() {
+    char x[] = "hello";
+    char y[] = "hello";
+    const char *px = str_intern(x);
+    const char *py = str_intern(y);
+    assert(px == py);
+    char z[] = "hello!";
+    const char *pz = str_intern(z);
+    assert(pz != px);
+}
+
+//////////////////
+// lexer stuff
+//////////////////
 typedef enum TokenKind {
     TOKEN_INT = 128,
     TOKEN_NAME,
@@ -89,12 +126,11 @@ typedef enum TokenKind {
 
 typedef struct Token {
     TokenKind kind;
+    const char *start;
+    const char *end;
     union {
         uint64_t val;
-        struct {
-            const char *start;
-            const char *end;
-        };
+        const char *name;
     };
 } Token;
 
@@ -102,6 +138,7 @@ Token token;
 const char *stream;
 
 void next_token() {
+    token.start = stream;
     switch (*stream) {
     case '0':
     case '1':
@@ -175,19 +212,18 @@ void next_token() {
     case 'Y':
     case 'Z':
     case '_': {
-        const char *start = stream++;
         while (isalnum(*stream) || *stream == '_') {
             stream++;
         }
         token.kind = TOKEN_NAME;
-        token.start = start;
-        token.end = stream;
+        token.name = str_intern_range(token.start, stream);
         break;
     }
     default:
         token.kind = *stream++;
         break;
     }
+    token.end = stream;
 }
 
 void print_token(Token token) {
@@ -196,7 +232,7 @@ void print_token(Token token) {
             printf("TOKEN_INT: %llu\n", token.val);
             break;
         case TOKEN_NAME:
-            printf("TOKEN_NAME: %.*s\n", (int)(token.end - token.start), token.start);
+            printf("TOKEN_NAME: %.*s -- %i\n", (int)(token.end - token.start), token.start, token.name);
             break;
         default:
             printf("TOKEN '%c'\n", token.kind);
@@ -206,7 +242,7 @@ void print_token(Token token) {
 }
 
 void lex_test() {
-    char *source = "+(((_HELLO12354+845";
+    char *source = "XY+(XY)((_HELLO1235XY4+845";
     stream = source;
     next_token();
     while(token.kind) {
@@ -223,6 +259,7 @@ int main(int argc, char **argv) {
 
     buf_test();
     lex_test();
+    str_intern_test();
 
     return 0;
 }
