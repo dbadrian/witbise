@@ -327,7 +327,7 @@ void lex_test() {
 
 /*
 expr3 = INT | '(' expr ')'
-expr2 = [-]expr3
+expr2 = [-]expr2 | expr3
 expr1 = expr2 ([/*] expr2)*
 expr0 = expr1 ([+-] expr1)*
 */
@@ -350,7 +350,10 @@ int parse_expr3() {
 
 int parse_expr2() {
     if (match_token('-')) {
-        return -parse_expr3();
+        return -parse_expr2();
+    }
+    else if (match_token('+')) {
+        return parse_expr2();
     } else {
         return parse_expr3();
     }
@@ -365,7 +368,7 @@ int parse_expr1() {
         if (op == '*') {
             val *= rval;
         } else {
-            assert(op == '-');
+            assert(op == '/');
             assert(rval != 0);
             val /= rval;
         }
@@ -382,6 +385,7 @@ int parse_expr0() {
         if (op == '+') {
             val += rval;
         } else {
+            assert(op == '-');
             val -= rval;
         }
     }
@@ -407,6 +411,8 @@ void parse_test() {
     TEST_EXPR(4-(2-1));
     TEST_EXPR(-42);
     TEST_EXPR(2+-3);
+    TEST_EXPR(9/3);
+    TEST_EXPR(-+3);
 
 #undef TEST_EXPR
 }
